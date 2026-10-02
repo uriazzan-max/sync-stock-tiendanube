@@ -23,4 +23,10 @@ enabled = true
 MODO_PRUEBA = "true"
 PREFIJO_PRUEBA = "TEST-"
 MAX_ESCRITURAS = "25"
+# Cómo se emparejan las variantes (ver README):
+# TIENDA_1 = como Hydra (SKU = nombre del producto en la otra tienda)
+# TIENDA_2 = como For You Audaz (el nombre del producto es la clave)
+EMPAREJAR = "sku+variante"
+TIENDA_1_CLAVE = "sku"
+TIENDA_2_CLAVE = "nombre"
 API_BASE = "https://api.tiendanube.com/2025-03"

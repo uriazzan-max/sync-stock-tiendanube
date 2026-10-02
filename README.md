@@ -70,7 +70,17 @@ Los tokens **nunca** van en el código ni en el chat.
 | `MODO_PRUEBA` | `"true"` | Solo sincroniza SKUs con el prefijo de prueba |
 | `PREFIJO_PRUEBA` | `"TEST-"` | Prefijo de los SKUs de prueba |
 | `MAX_ESCRITURAS` | `"25"` | Máximo de ajustes por pasada (el resto sigue en la próxima) |
+| `EMPAREJAR` | `"sku"` | `"sku"`: cada variante con su SKU propio. `"sku+variante"`: SKU + color/talle, para tiendas donde todas las variantes de un producto comparten el SKU |
 | `API_BASE` | `https://api.tiendanube.com/2025-03` | Versión de la API de Tiendanube |
+
+## Cómo se emparejan las variantes
+
+Cada variante recibe una clave; las que tienen la misma clave en distintas tiendas se sincronizan.
+
+1. **Enlaces guardados** (panel → Herramientas → "Enlazar variantes a mano"): `idTienda:idVariante = idTienda:idVariante`, uno por línea. Sirven cuando el SKU no coincide entre tiendas o la variante no tiene SKU. Un enlace gana sobre la regla automática.
+2. **Regla automática** según `EMPAREJAR`. En modo `sku+variante` no importan mayúsculas, acentos ni el orden de las propiedades, y cada tienda elige su clave de producto con `TIENDA_n_CLAVE`: `"sku"` o `"nombre"` (ej.: Hydra usa como SKU el nombre que el producto tiene en For You Audaz).
+
+Si cambiás `EMPAREJAR`, usá "Reiniciar bases" para que arranque de cero con las claves nuevas.
 
 ## Límites y riesgos conocidos
 
@@ -85,7 +95,7 @@ Los tokens **nunca** van en el código ni en el chat.
 ## Desarrollo
 
 ```bash
-npm test     # 29 pruebas: motor, cliente de la API y el Worker de punta a punta
+npm test     # 44 pruebas: motor, emparejamiento, cliente de la API y el Worker de punta a punta
 ```
 
 `src/motor.js` tiene toda la lógica; `src/index.js` el Worker y el Durable Object; `src/panel.js` el panel; `src/tiendanube.js` el cliente de la API.
