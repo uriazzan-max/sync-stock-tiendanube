@@ -20,6 +20,7 @@ const ETIQUETAS = {
   error: 'Error',
   sku_duplicado: 'SKU duplicado',
   igualar: 'Igualar (resumen)',
+  enlaces: 'Enlaces',
   reinicio: 'Reinicio',
 };
 
@@ -70,6 +71,10 @@ export function renderPanel(estado, resultado, { webhookConfigurado }) {
   const avisos = [];
   if (estado.cfg.modoPrueba) avisos.push(`<div class="banda prueba">MODO PRUEBA: solo se tocan SKUs que empiezan con <code>${esc(estado.cfg.prefijoPrueba)}</code></div>`);
   else avisos.push('<div class="banda real">MODO REAL: se sincronizan todos los SKUs</div>');
+  const modo =
+    estado.cfg.emparejar === 'sku+variante'
+      ? `producto (${estado.tiendas.map((t) => `${t.nombre}: ${estado.cfg.claveProducto?.[t.id] === 'nombre' ? 'nombre' : 'SKU'}`).join(', ')}) + color/talle`
+      : 'SKU de cada variante';
   for (const p of estado.problemas) avisos.push(`<div class="banda error">${esc(p)}</div>`);
   if (estado.tiendas.length < 2) avisos.push('<div class="banda error">Hay menos de 2 tiendas configuradas. Cargá TIENDA_1_ID, TIENDA_1_TOKEN, TIENDA_2_ID y TIENDA_2_TOKEN en Cloudflare.</div>');
   if (!webhookConfigurado) avisos.push('<div class="banda alerta-b">Falta WEBHOOK_SECRETO: sin eso funciona igual, pero sincroniza una vez por minuto en lugar de al instante.</div>');
@@ -87,11 +92,11 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:6px 8px;
 .num{text-align:right;font-variant-numeric:tabular-nums}.ok{color:var(--verde)}.alerta{color:var(--naranja)}.gris{color:var(--suave)}
 .t-error td,.t-sobreventa td{color:var(--rojo)}code{font-size:12px;white-space:nowrap}
 .acciones{display:flex;flex-wrap:wrap;gap:8px;align-items:center}button{font:inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--borde);background:var(--carta);color:var(--texto);cursor:pointer}
-button.prim{background:var(--azul);border-color:var(--azul);color:#fff}input,select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--borde);background:var(--carta);color:var(--texto)}
+button.prim{background:var(--azul);border-color:var(--azul);color:#fff}input,select,textarea{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--borde);background:var(--carta);color:var(--texto)}
 pre{white-space:pre-wrap;word-break:break-word;font-size:12px;margin:0}.tabla{overflow-x:auto}details summary{cursor:pointer;color:var(--suave)}
 </style></head><body><main>
 <h1>Sincronización de stock entre Tiendanube</h1>
-<p class="sub">${estado.tiendas.map((t) => esc(`${t.nombre} (${t.id})`)).join(' ↔ ') || 'Sin tiendas'}</p>
+<p class="sub">${estado.tiendas.map((t) => esc(`${t.nombre} (${t.id})`)).join(' ↔ ') || 'Sin tiendas'} · empareja por ${esc(modo)} · ${esc(estado.enlaces ?? 0)} enlaces guardados</p>
 ${avisos.join('')}
 ${resultado ? `<div class="carta"><strong>${esc(resultado.titulo)}</strong><pre>${esc(JSON.stringify(resultado.datos, null, 2))}</pre></div>` : ''}
 
@@ -107,8 +112,8 @@ ${resultado ? `<div class="carta"><strong>${esc(resultado.titulo)}</strong><pre>
   </div>
 </div>
 
-<h2>Stock por SKU</h2>
-<div class="carta tabla"><table><thead><tr><th>SKU</th><th>Producto</th>${estado.tiendas.map((t) => `<th class="num">${esc(t.nombre)}</th>`).join('')}<th>Estado</th></tr></thead>
+<h2>Stock por variante</h2>
+<div class="carta tabla"><table><thead><tr><th>Clave</th><th>Producto</th>${estado.tiendas.map((t) => `<th class="num">${esc(t.nombre)}</th>`).join('')}<th>Estado</th></tr></thead>
 <tbody>${filasHtml || `<tr><td colspan="${estado.tiendas.length + 3}" class="gris">Todavía no hay datos. Apretá "Sincronizar ahora".</td></tr>`}</tbody></table></div>
 
 <h2>Movimientos recientes</h2>
@@ -121,6 +126,13 @@ ${resultado ? `<div class="carta"><strong>${esc(resultado.titulo)}</strong><pre>
   <p>Deja todas las tiendas con el mismo stock que la tienda elegida, SKU por SKU. Usalo una vez al arrancar, en un horario sin ventas.</p>
   <form method="post" action="/admin/igualar" class="acciones"><select name="referencia">${opciones}</select>
   <input name="confirmar" placeholder="Escribí IGUALAR" autocomplete="off"><button>Igualar</button></form></details>
+</div>
+<div class="carta">
+  <details><summary>Enlazar variantes a mano (para SKUs que no coinciden entre tiendas)</summary>
+  <p>Una línea por variante: <code>idTienda:idVariante = idTienda:idVariante</code>. Lo que va después de <code>#</code> es una nota. Ej: <code>${esc(estado.tiendas[0]?.id || '111')}:1172139657 = ${esc(estado.tiendas[1]?.id || '222')}:2233445566 # Gamulan Almendra S</code></p>
+  <form method="post" action="/admin/enlaces-importar"><textarea name="lineas" rows="6" style="width:100%;font:12px ui-monospace,monospace" placeholder="idTienda:idVariante = idTienda:idVariante"></textarea>
+  <div class="acciones" style="margin-top:8px"><button>Guardar enlaces</button></div></form>
+  <form method="post" action="/admin/enlaces-borrar" class="acciones" style="margin-top:10px"><input name="confirmar" placeholder="Escribí BORRAR" autocomplete="off"><button>Borrar todos los enlaces</button></form></details>
 </div>
 <div class="carta">
   <details><summary>Reiniciar bases (no toca stock)</summary>

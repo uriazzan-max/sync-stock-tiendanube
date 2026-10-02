@@ -17,45 +17,61 @@
 //   Si un ajuste falla (red caída, error de la API), queda guardado como
 //   "pendiente" y se reintenta en la próxima corrida.
 
-/** Agrupa las variantes por SKU. SKUs repetidos en una misma tienda se marcan. */
-export function indexarPorSku(variantes) {
+import { claveDe, normalizarSku } from './emparejar.js';
+
+export { normalizarSku };
+
+/**
+ * Agrupa las variantes de una tienda por su clave de emparejamiento
+ * (ver emparejar.js). Claves repetidas en una misma tienda se marcan.
+ */
+export function indexarPorSku(variantes, tienda = '', empareja = {}) {
   const mapa = new Map();
   for (const v of variantes) {
-    const sku = normalizarSku(v.sku);
-    if (!sku) continue; // variantes sin SKU: se ignoran siempre
-    if (mapa.has(sku)) {
-      mapa.get(sku).duplicado = true;
+    const clave = claveDe(v, tienda, empareja);
+    if (!clave) continue; // variantes sin SKU ni enlace: se ignoran
+    if (mapa.has(clave)) {
+      mapa.get(clave).duplicado = true;
       continue;
     }
-    mapa.set(sku, { ...v, sku, duplicado: false });
+    mapa.set(clave, { ...v, clave, sku: normalizarSku(v.sku), duplicado: false });
   }
   return mapa;
 }
 
-export function normalizarSku(sku) {
-  if (sku === null || sku === undefined) return '';
-  return String(sku).trim();
-}
-
-/** El filtro de seguridad del modo prueba. */
+/** El filtro de seguridad del modo prueba (mira el SKU real de la variante). */
 export function skuPermitido(sku, cfg) {
   if (!cfg.modoPrueba) return true;
-  return sku.startsWith(cfg.prefijoPrueba);
+  return normalizarSku(sku).startsWith(cfg.prefijoPrueba);
 }
 
-function guardiaPrueba(sku, cfg) {
-  if (!skuPermitido(sku, cfg)) {
-    throw new Error(`Bloqueado por modo prueba: el SKU "${sku}" no empieza con "${cfg.prefijoPrueba}"`);
+function guardiaPrueba(item, cfg) {
+  if (!skuPermitido(item.sku, cfg)) {
+    throw new Error(`Bloqueado por modo prueba: el SKU "${item.sku}" no empieza con "${cfg.prefijoPrueba}"`);
   }
 }
 
-async function leerTodas(tiendas, apis) {
+/** En modo prueba, una clave se toca solo si TODAS sus variantes son de prueba. */
+function clavePermitida(clave, fotos, cfg) {
+  if (!cfg.modoPrueba) return true;
+  for (const foto of fotos.values()) {
+    const item = foto.get(clave);
+    if (item && !skuPermitido(item.sku, cfg)) return false;
+  }
+  return true;
+}
+
+function emparejamiento(db, cfg) {
+  return { modo: cfg.emparejar || 'sku', claveProducto: cfg.claveProducto || {}, enlaces: db.mapaEnlaces ? db.mapaEnlaces() : new Map() };
+}
+
+async function leerTodas(tiendas, apis, empareja) {
   const fotos = new Map();
   const errores = [];
   await Promise.all(
     tiendas.map(async (t) => {
       try {
-        fotos.set(t.id, indexarPorSku(await apis.get(t.id).listarVariantes()));
+        fotos.set(t.id, indexarPorSku(await apis.get(t.id).listarVariantes(), t.id, empareja));
       } catch (e) {
         errores.push({ tienda: t.id, error: String(e.message || e) });
       }
@@ -80,7 +96,7 @@ export async function sincronizar({ tiendas, apis, db, cfg }) {
     return resumen;
   }
 
-  const { fotos, errores } = await leerTodas(tiendas, apis);
+  const { fotos, errores } = await leerTodas(tiendas, apis, emparejamiento(db, cfg));
   if (errores.length) {
     // Si no pudimos leer alguna tienda, no tocamos nada: sin la foto completa
     // no se puede calcular bien el cambio total. Se reintenta en la próxima.
@@ -94,7 +110,7 @@ export async function sincronizar({ tiendas, apis, db, cfg }) {
   let escrituras = 0;
 
   for (const sku of [...skus].sort()) {
-    if (!skuPermitido(sku, cfg)) continue;
+    if (!clavePermitida(sku, fotos, cfg)) continue;
 
     // Qué tiendas participan para este SKU
     const participantes = [];
@@ -103,7 +119,7 @@ export async function sincronizar({ tiendas, apis, db, cfg }) {
       if (!item) continue;
       if (item.duplicado) {
         db.borrarBase(t.id, sku);
-        db.anotarAviso(sku, t.id, 'sku_duplicado', 'El SKU está repetido en esta tienda; no se sincroniza');
+        db.anotarAviso(sku, t.id, 'sku_duplicado', 'Hay más de una variante con esta clave en esta tienda; no se sincroniza');
         continue;
       }
       if (item.stock === null) {
@@ -150,7 +166,7 @@ export async function sincronizar({ tiendas, apis, db, cfg }) {
       }
       escrituras++;
       try {
-        guardiaPrueba(sku, cfg);
+        guardiaPrueba(p.item, cfg);
         const quedo = await apis.get(p.t.id).ajustarStock(p.item.productoId, p.item.varianteId, p.v);
         const esperado = p.item.stock + p.v;
         let nuevaBase = esperado;
@@ -185,7 +201,7 @@ export async function igualar({ tiendas, apis, db, cfg, referencia }) {
     resumen.errores.push({ error: `La tienda de referencia ${referencia} no está configurada` });
     return resumen;
   }
-  const { fotos, errores } = await leerTodas(tiendas, apis);
+  const { fotos, errores } = await leerTodas(tiendas, apis, emparejamiento(db, cfg));
   if (errores.length) {
     resumen.errores.push(...errores);
     return resumen;
@@ -193,7 +209,7 @@ export async function igualar({ tiendas, apis, db, cfg, referencia }) {
   const ref = fotos.get(referencia);
   let escrituras = 0;
   for (const [sku, itemRef] of [...ref.entries()].sort()) {
-    if (!skuPermitido(sku, cfg) || itemRef.duplicado || itemRef.stock === null) continue;
+    if (!clavePermitida(sku, fotos, cfg) || itemRef.duplicado || itemRef.stock === null) continue;
     const objetivo = itemRef.stock;
     for (const t of tiendas) {
       if (t.id === referencia) continue;
@@ -213,7 +229,7 @@ export async function igualar({ tiendas, apis, db, cfg, referencia }) {
       }
       escrituras++;
       try {
-        guardiaPrueba(sku, cfg);
+        guardiaPrueba(item, cfg);
         const quedo = await apis.get(t.id).reemplazarStock(item.productoId, item.varianteId, objetivo);
         db.guardarBase(t.id, sku, { base: quedo ?? objetivo, pendiente: 0, item: { ...item, stock: quedo ?? objetivo } });
         db.anotarMovimiento({ sku, tienda: t.id, tipo: 'igualado', valor: objetivo - item.stock, detalle: `stock ${item.stock} → ${objetivo} (referencia: ${referencia})` });

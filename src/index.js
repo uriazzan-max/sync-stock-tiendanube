@@ -12,6 +12,7 @@ import { BaseDeDatos } from './baseDeDatos.js';
 import { leerConfig, crearApis, USER_AGENT as USER_AGENT_DIAG } from './config.js';
 import { sincronizar, igualar } from './motor.js';
 import { renderPanel } from './panel.js';
+import { parsearEnlaces } from './emparejar.js';
 
 const EVENTOS_WEBHOOK = ['order/created', 'order/paid', 'order/cancelled', 'order/edited', 'product/updated'];
 
@@ -83,6 +84,25 @@ export class Sincronizador extends DurableObject {
     });
   }
 
+  /** Guarda enlaces escritos como texto (ver parsearEnlaces). */
+  importarEnlaces(texto) {
+    return this._enSerie(async () => {
+      const { tiendas } = leerConfig(this.env);
+      const { grupos, errores } = parsearEnlaces(texto, tiendas.map((t) => t.id));
+      const guardados = this.db.guardarEnlaces(grupos);
+      this.db.anotarMovimiento({ tipo: 'enlaces', detalle: `Se guardaron ${guardados} enlaces${errores.length ? ` (${errores.length} líneas con error)` : ''}` });
+      return { guardados, errores, aviso: guardados ? 'Los enlaces nuevos arrancan sin mover stock: si las tiendas tienen stock distinto, usá "Igualar".' : undefined };
+    });
+  }
+
+  borrarEnlaces() {
+    return this._enSerie(async () => {
+      this.db.borrarEnlaces();
+      this.db.anotarMovimiento({ tipo: 'enlaces', detalle: 'Se borraron todos los enlaces' });
+      return { ok: true };
+    });
+  }
+
   estado() {
     const { tiendas, problemas, cfg } = leerConfig(this.env);
     return {
@@ -92,6 +112,7 @@ export class Sincronizador extends DurableObject {
       ultimaCorrida: this.db.leerAjuste('ultima_corrida'),
       ultimaConActividad: this.db.leerAjuste('ultima_corrida_con_actividad'),
       bases: this.db.listarBases(),
+      enlaces: this.db.contarEnlaces(),
       movimientos: this.db.ultimosMovimientos(150),
     };
   }
@@ -242,6 +263,13 @@ export default {
           }
         } else if (accion === 'diagnostico') {
           resultado = { titulo: 'Diagnóstico de conexión', datos: await s.probarConexion() };
+        } else if (accion === 'enlaces-importar') {
+          resultado = { titulo: 'Importar enlaces', datos: await s.importarEnlaces(String(form.get('lineas') || '')) };
+        } else if (accion === 'enlaces-borrar') {
+          resultado =
+            form.get('confirmar') === 'BORRAR'
+              ? { titulo: 'Borrar enlaces', datos: await s.borrarEnlaces() }
+              : { titulo: 'Borrar enlaces', datos: { error: 'Escribí BORRAR para confirmar' } };
         } else if (accion === 'reiniciar') {
           resultado =
             form.get('confirmar') === 'REINICIAR'

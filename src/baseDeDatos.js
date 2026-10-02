@@ -33,7 +33,17 @@ export class BaseDeDatos {
       detalle TEXT
     )`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS ajustes (k TEXT PRIMARY KEY, v TEXT)`);
+    // Enlaces manuales o importados: variantes del mismo "grupo" se sincronizan
+    // entre sí aunque su SKU no coincida.
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS enlaces (
+      tienda TEXT NOT NULL,
+      variante_id TEXT NOT NULL,
+      grupo TEXT NOT NULL,
+      nota TEXT,
+      PRIMARY KEY (tienda, variante_id)
+    )`);
     this.cache = null;
+    this.enlacesCache = null;
     this.avisados = new Set();
   }
 
@@ -127,6 +137,54 @@ export class BaseDeDatos {
 
   guardarAjuste(k, v) {
     this.sql.exec('INSERT INTO ajustes (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v', k, JSON.stringify(v));
+  }
+
+  /** Map "tienda:varianteId" → grupo (en memoria; se recarga si cambia). */
+  mapaEnlaces() {
+    if (!this.enlacesCache) {
+      this.enlacesCache = new Map();
+      for (const f of this.sql.exec('SELECT tienda, variante_id, grupo FROM enlaces').toArray()) {
+        this.enlacesCache.set(`${f.tienda}:${f.variante_id}`, f.grupo);
+      }
+    }
+    return this.enlacesCache;
+  }
+
+  /** Cantidad de grupos (un grupo = una variante enlazada entre tiendas). */
+  contarEnlaces() {
+    return this.sql.exec('SELECT COUNT(DISTINCT grupo) AS n FROM enlaces').toArray()[0]?.n ?? 0;
+  }
+
+  listarEnlaces() {
+    return this.sql.exec('SELECT * FROM enlaces ORDER BY grupo, tienda').toArray();
+  }
+
+  /**
+   * Guarda enlaces. Cada grupo es una lista de {tienda, varianteId}.
+   * Una variante pertenece a un solo grupo: si ya estaba enlazada, se mueve.
+   * @param {{grupo?:string, nota?:string, miembros:{tienda:string, varianteId:string}[]}[]} grupos
+   */
+  guardarEnlaces(grupos) {
+    let n = 0;
+    for (const g of grupos) {
+      if (!g.miembros || g.miembros.length < 2) continue;
+      const grupo = String(g.grupo || `${g.miembros[0].tienda}-${g.miembros[0].varianteId}`);
+      for (const m of g.miembros) {
+        this.sql.exec(
+          `INSERT INTO enlaces (tienda, variante_id, grupo, nota) VALUES (?, ?, ?, ?)
+           ON CONFLICT (tienda, variante_id) DO UPDATE SET grupo = excluded.grupo, nota = excluded.nota`,
+          String(m.tienda), String(m.varianteId), grupo, g.nota ?? null,
+        );
+      }
+      n++;
+    }
+    this.enlacesCache = null;
+    return n;
+  }
+
+  borrarEnlaces() {
+    this.sql.exec('DELETE FROM enlaces');
+    this.enlacesCache = null;
   }
 
   /** Borra todas las bases (para empezar de cero). No toca stock. */

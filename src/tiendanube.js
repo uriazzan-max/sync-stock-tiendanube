@@ -85,6 +85,9 @@ export class TiendanubeAPI {
             // stock null = stock infinito (Tiendanube no lo controla)
             stock: v.stock === null || v.stock === undefined || v.stock === '' ? null : Number(v.stock),
             nombre: nombre + textoValores(v.values),
+            producto: nombre,
+            // valores de la variante (color, talle...) para emparejar por SKU + variante
+            valores: Array.isArray(v.values) ? v.values.map(nombreTexto).filter(Boolean) : [],
           });
         }
       }
