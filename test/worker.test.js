@@ -119,3 +119,28 @@ test('registrar webhooks desde el panel (sin duplicar) e igualar', async () => {
   assert.equal(api.tiendas[222][0].variants[0].stock, 10);
   assert.equal(api.tiendas[222][0].variants[1].stock, 5, 'igualar respeta el modo prueba');
 });
+
+test('diagnóstico de conexión: muestra solo los últimos 4 caracteres del token', async () => {
+  const api = apiFalsa();
+  const e = entorno(api);
+  const r = await worker.fetch(new Request('https://x.dev/admin/diagnostico', { method: 'POST', headers: auth, body: new URLSearchParams() }), e.env, e.ctxWorker);
+  const h = await r.text();
+  assert.match(h, /termina en \.\.\.k111/);
+  assert.doesNotMatch(h, /tok111|tok222/);
+  assert.match(h, /Prueba A \(111\) · API 2025-03 · Authorization: OK/);
+  assert.match(h, /Prueba B \(222\) · API 2025-03 · Authorization: 401/);
+});
+
+test('panel: importar enlaces y verlos contados', async () => {
+  const api = apiFalsa();
+  const e = entorno(api);
+  const post = (ruta, campos = {}) =>
+    worker.fetch(new Request(`https://x.dev${ruta}`, { method: 'POST', headers: auth, body: new URLSearchParams(campos) }), e.env, e.ctxWorker);
+  const h = await (await post('/admin/enlaces-importar', { lineas: '111:12 = 222:22 # negro\n111:x = 222:1' })).text();
+  assert.match(h, /&quot;guardados&quot;: 1/);
+  assert.match(h, /1 enlaces guardados/);
+  const sinConfirmar = await (await post('/admin/enlaces-borrar', { confirmar: 'no' })).text();
+  assert.match(sinConfirmar, /1 enlaces guardados/);
+  const borrado = await (await post('/admin/enlaces-borrar', { confirmar: 'BORRAR' })).text();
+  assert.match(borrado, /0 enlaces guardados/);
+});
