@@ -102,6 +102,7 @@ ${resultado ? `<div class="carta"><strong>${esc(resultado.titulo)}</strong><pre>
     <form method="post" action="/admin/sincronizar"><button class="prim">Sincronizar ahora</button></form>
     <form method="post" action="/admin/webhooks-registrar"><button>Registrar webhooks</button></form>
     <form method="post" action="/admin/webhooks-ver"><button>Ver webhooks</button></form>
+    <form method="post" action="/admin/diagnostico"><button>Probar conexión</button></form>
     <a href="/admin"><button type="button">Actualizar</button></a>
   </div>
 </div>

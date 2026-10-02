@@ -9,7 +9,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { BaseDeDatos } from './baseDeDatos.js';
-import { leerConfig, crearApis } from './config.js';
+import { leerConfig, crearApis, USER_AGENT as USER_AGENT_DIAG } from './config.js';
 import { sincronizar, igualar } from './motor.js';
 import { renderPanel } from './panel.js';
 
@@ -94,6 +94,45 @@ export class Sincronizador extends DurableObject {
       bases: this.db.listarBases(),
       movimientos: this.db.ultimosMovimientos(150),
     };
+  }
+
+  /**
+   * Diagnóstico de conexión: prueba cada token contra cada tienda, con las
+   * dos formas de mandar el token y dos versiones de la API. Nunca muestra
+   * el token: solo sus últimos 4 caracteres, para compararlos con los que
+   * muestra Tiendanube en "Aplicaciones a medida".
+   */
+  async probarConexion() {
+    const { tiendas } = leerConfig(this.env);
+    const salida = [];
+    for (const t of tiendas) {
+      const token = t.token;
+      const fila = {
+        token: `TIENDA_${t.n}_TOKEN termina en ...${token.slice(-4)} (largo ${token.length}${/\s/.test(token) ? ', TIENE ESPACIOS' : ''})`,
+        resultados: [],
+      };
+      for (const destino of tiendas) {
+        for (const version of ['2025-03', 'v1']) {
+          for (const [nombreHeader, headers] of [
+            ['Authentication', { Authentication: `bearer ${token}` }],
+            ['Authorization', { Authorization: `Bearer ${token}` }],
+          ]) {
+            let estado;
+            try {
+              const r = await fetch(`https://api.tiendanube.com/${version}/${destino.id}/products?per_page=1&fields=id`, {
+                headers: { ...headers, 'User-Agent': USER_AGENT_DIAG },
+              });
+              estado = r.status === 200 ? 'OK' : `${r.status}`;
+            } catch (e) {
+              estado = `falló: ${e.message}`;
+            }
+            fila.resultados.push(`tienda ${destino.nombre} (${destino.id}) · API ${version} · ${nombreHeader}: ${estado}`);
+          }
+        }
+      }
+      salida.push(fila);
+    }
+    return salida;
   }
 
   async webhooks(accion, urlWebhook) {
@@ -201,6 +240,8 @@ export default {
           } else {
             resultado = { titulo: 'Igualar stock', datos: await s.igualarDesde(String(form.get('referencia'))) };
           }
+        } else if (accion === 'diagnostico') {
+          resultado = { titulo: 'Diagnóstico de conexión', datos: await s.probarConexion() };
         } else if (accion === 'reiniciar') {
           resultado =
             form.get('confirmar') === 'REINICIAR'
